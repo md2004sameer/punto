@@ -1,43 +1,45 @@
-import { IGrammarLlmProvider } from '../providers/grammar/llm-provider.interface';
-import { GrammarRequest, GrammarCheckResponse, GrammarError } from '../types/grammar.types';
-import { LRUCache } from 'lru-cache';
-import config from '../config';
+import { env } from '../config';
+import { logger } from '../utils/logger';
+import { IGrammarProvider } from '../providers/grammar/grammar-provider.interface';
+import { chunkText } from '../utils/text-chunker';
 
 export class GrammarService {
-  private cache: LRUCache<string, GrammarCheckResponse>;
+  constructor(private provider: IGrammarProvider) {}
 
-  constructor(private readonly llmProvider: IGrammarLlmProvider) {
-    this.cache = new LRUCache<string, GrammarCheckResponse>({
-      max: config.CACHE_MAX_ENTRIES,
-      ttl: config.CACHE_TTL_MS,
-    });
-  }
+  async checkGrammar(text: string, language: string, detailed: boolean) {
+    const maxLength = env.MAX_TEXT_LENGTH;
 
-  async checkGrammar(request: GrammarRequest): Promise<GrammarCheckResponse> {
-    const { text, language, detailed } = request;
-    const cacheKey = `${language}::${text}`;
-
-    const cached = this.cache.get(cacheKey);
-    if (cached) {
-      return cached;
+    // If under limit, process directly
+    if (text.length <= maxLength) {
+      logger.debug({ textLength: text.length, language }, 'Checking grammar for single chunk');
+      const result = await this.provider.checkGrammar(text, language, detailed);
+      return {
+        originalText: text,
+        correctedText: result.correctedText,
+        issues: result.issues,
+        chunksProcessed: 1,
+      };
     }
 
-    const result = await this.llmProvider.checkGrammar(text, { language });
+    // LONG TEXT: Chunk and process in parallel
+    logger.info({ textLength: text.length, chunks: 'calculating' }, 'Long text detected for grammar check, chunking...');
+    const chunks = chunkText(text, maxLength);
+    logger.info({ chunkCount: chunks.length }, 'Processing grammar chunks in parallel');
 
-    const errors: GrammarError[] = result.errors.map((e) => ({
-      ...e,
-      explanation: detailed ? e.explanation : undefined,
-    }));
+    // Process all chunks concurrently
+    const results = await Promise.all(
+      chunks.map((chunk) => this.provider.checkGrammar(chunk, language, detailed))
+    );
 
-    const response: GrammarCheckResponse = {
+    // Stitch corrections and collect all issues
+    const correctedText = results.map((r) => r.correctedText).join(' ');
+    const allIssues = results.flatMap((r) => r.issues || []);
+
+    return {
       originalText: text,
-      correctedText: result.correctedText,
-      grammarScore: result.grammarScore,
-      changesCount: result.errors.length,
-      errors,
+      correctedText,
+      issues: allIssues,
+      chunksProcessed: results.length,
     };
-
-    this.cache.set(cacheKey, response);
-    return response;
   }
 }

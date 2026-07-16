@@ -31,4 +31,4 @@ try {
 
 export default config;
 
-  MAX_TEXT_LENGTH: z.coerce.number().default(1000000),
+  MAX_TEXT_LENGTH: z.coerce.number().default(2000),

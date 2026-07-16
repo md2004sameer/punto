@@ -3,6 +3,7 @@ import cors from 'cors';
 import { requestIdMiddleware } from './middleware/request-id';
 import { defaultLimiter } from './middleware/rate-limiter';
 import { errorHandler } from './middleware/error-handler';
+import { asyncHandler } from './utils/async-handler';
 import config from './config';
 import { logger } from './utils/logger';
 
@@ -65,9 +66,9 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'ok' });
 });
 
-// Routes
-app.post('/api/v1/paraphrase', (req, res) => paraphraserController.handle(req, res));
-app.post('/api/v1/grammar-check', (req, res) => grammarController.handle(req, res));
+// Routes (with async error wrapping)
+app.post('/api/v1/paraphrase', asyncHandler(paraphraserController.handle));
+app.post('/api/v1/grammar-check', asyncHandler(grammarController.handle));
 
 app.use(errorHandler);
 

@@ -2,6 +2,13 @@ import { IGrammarLlmProvider } from './llm-provider.interface';
 import { GrammarCheckResult, grammarCheckResultSchema } from '../../types/grammar.types';
 import config from '../../config';
 import { logger } from '../../utils/logger';
+import {
+  AuthenticationError,
+  RateLimitError,
+  ProviderTimeoutError,
+  ProviderUnavailableError,
+  InternalAIError,
+} from '../../errors';
 
 const SYSTEM_PROMPT = `You are a professional English grammar checker.
 Analyze the user's text for spelling, grammar, punctuation, capitalization, and sentence structure errors.
@@ -63,13 +70,18 @@ export class DeepseekGrammarProvider implements IGrammarLlmProvider {
       clearTimeout(timeoutId);
 
       if (!response.ok) {
+        if (response.status === 401 || response.status === 403) {
+          throw new AuthenticationError();
+        }
+        if (response.status === 429) {
+          throw new RateLimitError();
+        }
         const errorBody = await response.text();
-        throw new Error(`DeepSeek API error ${response.status}: ${errorBody}`);
+        throw new ProviderUnavailableError(`DeepSeek API error ${response.status}: ${errorBody}`);
       }
       const data = (await response.json()) as any;
       const content = data?.choices?.[0]?.message?.content?.trim();
-
-      if (!content) throw new Error('DeepSeek returned an empty response.');
+      if (!content) throw new InternalAIError('DeepSeek returned an empty response.');
 
       let parsed: unknown;
       try {
@@ -79,15 +91,19 @@ export class DeepseekGrammarProvider implements IGrammarLlmProvider {
         if (match) {
           parsed = JSON.parse(match[1].trim());
         } else {
-          throw new Error('Failed to parse grammar check result.');
+          throw new InternalAIError('Failed to parse grammar check result.');
         }
       }
       return grammarCheckResultSchema.parse(parsed);
     } catch (error: any) {
       clearTimeout(timeoutId);
-      if (error.name === 'AbortError') throw new Error('DeepSeek request timed out.');
-      logger.error({ err: error }, 'DeepSeek grammar check failed');
-      throw error;
+      if (error.name === 'AbortError') {
+        throw new ProviderTimeoutError();
+      }
+      if (error instanceof AuthenticationError || error instanceof RateLimitError || error instanceof ProviderUnavailableError || error instanceof InternalAIError || error instanceof ProviderTimeoutError) {
+        throw error;
+      }
+      throw new InternalAIError(error.message || 'Unknown DeepSeek error');
     }
   }
 }

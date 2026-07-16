@@ -1,6 +1,13 @@
 import { IParaphraserLlmProvider, ParaphraseResult } from './llm-provider.interface';
 import { ParaphraseStyle } from '../../types/paraphrase.types';
 import config from '../../config';
+import {
+  AuthenticationError,
+  RateLimitError,
+  ProviderTimeoutError,
+  ProviderUnavailableError,
+  InternalAIError,
+} from '../../errors';
 
 const STYLE_INSTRUCTIONS: Record<ParaphraseStyle, string> = {
   standard: 'Rewrite the sentence in a straightforward way, preserving the original meaning.',
@@ -58,17 +65,29 @@ export class DeepseekParaphraserProvider implements IParaphraserLlmProvider {
       clearTimeout(timeoutId);
 
       if (!response.ok) {
+        if (response.status === 401 || response.status === 403) {
+          throw new AuthenticationError();
+        }
+        if (response.status === 429) {
+          throw new RateLimitError();
+        }
         const errorBody = await response.text();
-        throw new Error(`DeepSeek API error ${response.status}: ${errorBody}`);
+        throw new ProviderUnavailableError(`DeepSeek API error ${response.status}: ${errorBody}`);
       }
       const data = (await response.json()) as any;
       const paraphrasedText = data?.choices?.[0]?.message?.content?.trim();
-      if (!paraphrasedText) throw new Error('DeepSeek returned an empty response.');
+      if (!paraphrasedText) throw new InternalAIError('DeepSeek returned an empty response.');
       return { paraphrasedText, confidence: 0.85 };
     } catch (error: any) {
       clearTimeout(timeoutId);
-      if (error.name === 'AbortError') throw new Error('DeepSeek request timed out.');
-      throw error;
+      if (error.name === 'AbortError') {
+        throw new ProviderTimeoutError();
+      }
+      if (error instanceof AuthenticationError || error instanceof RateLimitError || error instanceof ProviderUnavailableError || error instanceof InternalAIError || error instanceof ProviderTimeoutError) {
+        throw error;
+      }
+      // Wrap unknown errors
+      throw new InternalAIError(error.message || 'Unknown DeepSeek error');
     }
   }
 }

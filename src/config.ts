@@ -1,0 +1,32 @@
+import { z } from 'zod';
+
+const envSchema = z.object({
+  PORT: z.coerce.number().int().positive().default(3000),
+  DEEPSEEK_API_KEY: z.string().min(1, 'DEEPSEEK_API_KEY is required'),
+  DEEPSEEK_MODEL: z.string().default('deepseek-chat'),
+  DEEPSEEK_BASE_URL: z.string().url().default('https://api.deepseek.com/v1'),
+  DEEPSEEK_TIMEOUT_MS: z.coerce.number().int().positive().default(12000),
+  CACHE_MAX_ENTRIES: z.coerce.number().int().positive().default(500),
+  CACHE_TTL_MS: z.coerce.number().int().positive().default(3600000),
+  RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(900000),
+  RATE_LIMIT_MAX_REQUESTS: z.coerce.number().int().positive().default(100),
+  CIRCUIT_BREAKER_TIMEOUT_MS: z.coerce.number().int().positive().default(12000),
+  CIRCUIT_BREAKER_ERROR_THRESHOLD_PERCENT: z.coerce.number().int().min(1).max(100).default(50),
+  CIRCUIT_BREAKER_RESET_TIMEOUT_MS: z.coerce.number().int().positive().default(30000),
+  BODY_SIZE_LIMIT: z.string().default('12kb'),
+  LOG_LEVEL: z.string().default('info'),
+  NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
+  DEFAULT_LANGUAGE: z.string().default('en'),
+});
+
+export type EnvConfig = z.infer<typeof envSchema>;
+
+let config: EnvConfig;
+try {
+  config = envSchema.parse(process.env);
+} catch (error) {
+  console.error('❌ Invalid environment configuration:', error);
+  process.exit(1);
+}
+
+export default config;
